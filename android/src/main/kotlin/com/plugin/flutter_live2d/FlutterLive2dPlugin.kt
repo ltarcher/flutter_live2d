@@ -25,7 +25,7 @@ class FlutterLive2dPlugin: FlutterPlugin, MethodCallHandler {
             channel.setMethodCallHandler(this)
             println("FlutterLive2dPlugin: Method handler set")
             
-            viewFactory = Live2DViewFactory()
+            viewFactory = Live2DViewFactory(flutterPluginBinding.binaryMessenger)
             println("FlutterLive2dPlugin: View factory created")
             
             flutterPluginBinding
@@ -33,7 +33,7 @@ class FlutterLive2dPlugin: FlutterPlugin, MethodCallHandler {
                 .registerViewFactory("live2d_view", viewFactory!!)
             println("FlutterLive2dPlugin: View factory registered")
         } catch (e: Exception) {
-            println("FlutterLive2dPlugin: Error in onAttachedToEngine")
+            println("FlutterLive2dPlugin: Error during attachment - ${e.message}")
             e.printStackTrace()
         }
         

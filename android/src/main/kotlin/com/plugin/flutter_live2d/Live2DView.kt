@@ -15,8 +15,11 @@ import android.opengl.GLES20
 import com.live2d.sdk.cubism.core.ICubismLogger
 import com.live2d.sdk.cubism.framework.CubismFrameworkConfig.LogLevel
 import com.live2d.sdk.cubism.framework.rendering.android.CubismRendererAndroid
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
 
-class Live2DView(context: Context) : GLSurfaceView(context), GLSurfaceView.Renderer {
+class Live2DView(context: Context, messenger: BinaryMessenger, viewId: Int) : GLSurfaceView(context), GLSurfaceView.Renderer, MethodChannel.MethodCallHandler {
     private var model: Live2DModel? = null
     private var renderer: CubismRendererAndroid? = null
     private var modelMatrix: CubismMatrix44? = null
@@ -24,14 +27,16 @@ class Live2DView(context: Context) : GLSurfaceView(context), GLSurfaceView.Rende
     private var scale = 1.0f
     private var positionX = 0.0f
     private var positionY = 0.0f
+    private val methodChannel: MethodChannel = MethodChannel(messenger, "live2d_view_$viewId")
 
     init {
         println("Live2DView: Initializing...")
         // 设置透明背景
         setEGLConfigChooser(8, 8, 8, 8, 16, 0)
         holder.setFormat(PixelFormat.TRANSLUCENT)
+        setZOrderOnTop(true)
         
-        // Initialize Cubism Framework
+        // 初始化Live2D框架
         val option = CubismFramework.Option()
         option.logFunction = object : ICubismLogger {
             override fun print(message: String) {
@@ -46,6 +51,9 @@ class Live2DView(context: Context) : GLSurfaceView(context), GLSurfaceView.Rende
         setEGLContextClientVersion(2)
         setRenderer(this)
         renderMode = RENDERMODE_CONTINUOUSLY
+        
+        // 注册方法通道处理器
+        methodChannel.setMethodCallHandler(this)
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -57,9 +65,6 @@ class Live2DView(context: Context) : GLSurfaceView(context), GLSurfaceView.Rende
         // Set transparency
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-
-        // Initialize Cubism SDK framework
-        CubismFramework.initialize()
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -147,6 +152,60 @@ class Live2DView(context: Context) : GLSurfaceView(context), GLSurfaceView.Rende
         this.positionY = y
     }
 
+    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "loadModel" -> {
+                val modelPath = call.argument<String>("modelPath")
+                if (modelPath != null) {
+                    loadModel(modelPath)
+                    result.success(null)
+                } else {
+                    result.error("INVALID_ARGUMENT", "Model path is required", null)
+                }
+            }
+            "setScale" -> {
+                val scaleValue = call.argument<Double>("scale")
+                if (scaleValue != null) {
+                    scale = scaleValue.toFloat()
+                    result.success(null)
+                } else {
+                    result.error("INVALID_ARGUMENT", "Scale value is required", null)
+                }
+            }
+            "setPosition" -> {
+                val x = call.argument<Double>("x")
+                val y = call.argument<Double>("y")
+                if (x != null && y != null) {
+                    positionX = x.toFloat()
+                    positionY = y.toFloat()
+                    result.success(null)
+                } else {
+                    result.error("INVALID_ARGUMENT", "Position x and y are required", null)
+                }
+            }
+            "startMotion" -> {
+                val group = call.argument<String>("group")
+                val index = call.argument<Int>("index")
+                if (group != null && index != null) {
+                    startMotion(group, index)
+                    result.success(null)
+                } else {
+                    result.error("INVALID_ARGUMENT", "Motion group and index are required", null)
+                }
+            }
+            "setExpression" -> {
+                val expression = call.argument<String>("expression")
+                if (expression != null) {
+                    setExpression(expression)
+                    result.success(null)
+                } else {
+                    result.error("INVALID_ARGUMENT", "Expression is required", null)
+                }
+            }
+            else -> result.notImplemented()
+        }
+    }
+    
     // Add this public method for cleanup
     fun cleanup() {
         onDetachedFromWindow()
