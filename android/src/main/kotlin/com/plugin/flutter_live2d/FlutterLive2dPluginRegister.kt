@@ -1,17 +1,8 @@
 package com.plugin.flutter_live2d
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
-import io.flutter.plugin.common.PluginRegistry
 
-object FlutterLive2dPluginRegister {
-    fun registerWith(registry: PluginRegistry) {
-        println("FlutterLive2dPluginRegister: Registering plugin")
-        if (!registry.hasPlugin("com.plugin.flutter_live2d.FlutterLive2dPlugin")) {
-            FlutterLive2dPlugin().apply {
-                registry.registrarFor("com.plugin.flutter_live2d.FlutterLive2dPlugin")
-                    .platformViewRegistry()
-                    .registerViewFactory("live2d_view", Live2DViewFactory())
-            }
-        }
-    }
-} 
+/**
+ * 已移除：使用过时 API 的 registerWith 方法
+ * 现代 Flutter 插件通过 [FlutterPlugin] 接口进行生命周期管理
+ */
