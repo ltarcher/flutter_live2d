@@ -1,1 +1,5 @@
 rootProject.name = 'flutter_live2d'
+
+// 包含Live2D SDK作为一个模块
+include ':Live2DCubismCore'
+project(':Live2DCubismCore').projectDir = file('../sdk/CubismSdkForJava/Core/android')

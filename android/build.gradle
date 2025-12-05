@@ -5,7 +5,9 @@ buildscript {
     ext.kotlin_version = "1.8.22"
     repositories {
         google()
-        mavenCentral()
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
     }
 
     dependencies {
@@ -17,7 +19,9 @@ buildscript {
 allprojects {
     repositories {
         google()
-        mavenCentral()
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
     }
 }
 
@@ -69,5 +73,5 @@ android {
 
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
-    compileOnly(fileTree(dir: '../sdk/CubismSdkForJava/Core/android/', include: ['Live2DCubismCore.aar']))
+    implementation project(path: ':Live2DCubismCore')
 }
