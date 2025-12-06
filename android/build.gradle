@@ -78,15 +78,4 @@ android {
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
     compileOnly(fileTree(dir: '../sdk/CubismSdkForJava/Core/android/', include: ['Live2DCubismCore.aar']))
-    // 添加Framework依赖
-    api fileTree(dir: '../sdk/CubismSdkForJava/Framework/framework/build/outputs/aar/', include: ['framework-release.aar'], exclude: [])
 }
-
-// 添加task用于构建Framework AAR
-task buildFrameworkAar(type: Exec) {
-    workingDir '../sdk/CubismSdkForJava/Framework'
-    commandLine './gradlew', 'framework:assembleRelease'
-}
-
-// 确保在编译前构建Framework AAR
-preBuild.dependsOn buildFrameworkAar
