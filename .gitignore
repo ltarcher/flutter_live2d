@@ -26,3 +26,7 @@ doc/api/
 .flutter-plugins
 .flutter-plugins-dependencies
 .idea/
+*.bin
+*.lock
+gc.properties
+cache.properties
