@@ -16,6 +16,7 @@ var eyeBlink = null;
 var breath = null;
 var physics = null;
 var pose = null;
+var textures = []; // 添加textures变量
 
 // 动作和表情相关
 var expressions = {};
@@ -350,6 +351,16 @@ function initRenderer() {
 // 加载纹理
 async function loadTextures() {
     try {
+        // 清理之前可能存在的纹理
+        if (textures && textures.length > 0) {
+            for (let i = 0; i < textures.length; i++) {
+                if (textures[i]) {
+                    gl.deleteTexture(textures[i]);
+                }
+            }
+            textures = [];
+        }
+        
         const texturePromises = [];
         textures = []; // 初始化纹理数组
         
@@ -409,9 +420,6 @@ async function loadTextures() {
         } else {
             console.warn('cubismModel.saveParameters is not a function, skipping');
         }
-        
-        // 启动渲染循环
-        startRenderingLoop();
     } catch (e) {
         console.error('Error loading textures:', e);
         throw e;
@@ -547,14 +555,70 @@ async function loadMotionGroup(groupName) {
     }
 }
 
-// 加载模型
-async function loadModel(modelPath) {
+// 释放模型资源
+function releaseModel() {
     try {
-        // 停止之前的动画循环
+        // 取消动画循环
         if (animationFrameId) {
             cancelAnimationFrame(animationFrameId);
             animationFrameId = null;
         }
+        
+        // 释放纹理
+        if (textureManager && gl) {
+            textureManager.releaseTextures(gl);
+        }
+        
+        // 清理纹理数组
+        if (textures && textures.length > 0) {
+            for (let i = 0; i < textures.length; i++) {
+                if (textures[i]) {
+                    gl.deleteTexture(textures[i]);
+                }
+            }
+            textures = [];
+        }
+        
+        // 重置各个对象
+        if (cubismModel) {
+            cubismModel = null;
+        }
+        
+        if (cubismMoc) {
+            cubismMoc = null;
+        }
+        
+        if (renderer) {
+            renderer = null;
+        }
+        
+        if (modelSetting) {
+            modelSetting = null;
+        }
+        
+        // 重置其他组件
+        eyeBlink = null;
+        breath = null;
+        physics = null;
+        pose = null;
+        expressions = {};
+        motions = {};
+        modelMatrix = null;
+        
+        console.log('Model resources released');
+    } catch (e) {
+        console.error('Error releasing model:', e);
+    }
+}
+
+// 加载模型
+async function loadModel(modelPath) {
+    try {
+        // 释放之前的模型资源
+        releaseModel();
+        
+        // 重新初始化lastFrameTime
+        lastFrameTime = null;
         
         // 加载模型设置
         await loadModelSetting(modelPath);
@@ -708,6 +772,9 @@ async function loadModel(modelPath) {
         modelMatrix.bottom(1.0);
         modelMatrix.setWidth(2.0);
         
+        // 启动渲染循环
+        startRenderingLoop();
+        
         console.log('Model fully loaded and initialized');
         return true;
     } catch (e) {
@@ -801,6 +868,11 @@ function renderModel() {
         // 更新视口
         gl.viewport(0, 0, canvas.width, canvas.height);
         
+        // 设置投影矩阵
+        if (modelMatrix && renderer && typeof renderer.setMvpMatrix === 'function') {
+            renderer.setMvpMatrix(modelMatrix);
+        }
+        
         // 渲染模型
         if (renderer) {
             // 检查不同的渲染方法
@@ -821,27 +893,14 @@ function renderModel() {
     }
 }
 
-// 渲染循环
-function renderLoop() {
-    try {
-        if (!renderer || !cubismModel) {
-            console.warn('Renderer or model not ready');
-            return;
-        }
-
-        // 使用新的更新和渲染函数
-        updateModel();
-        renderModel();
-
-        // 请求下一帧
-        animationFrameId = requestAnimationFrame(renderLoop);
-    } catch (e) {
-        console.error('Error in render loop:', e);
-    }
-}
-
 // 启动渲染循环
 function startRenderingLoop() {
+    // 停止现有的渲染循环
+    if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+    }
+    
     if (!canvas) {
         console.error('Canvas not initialized');
         return;
@@ -852,21 +911,20 @@ function startRenderingLoop() {
         gl.clearColor(0.0, 0.0, 0.0, 0.0);
     }
     
-    // 启动渲染循环
-    function renderLoop() {
-        // 更新模型
-        updateModel();
-        
-        // 渲染模型
-        renderModel();
-        
-        // 继续循环
-        animationFrameId = requestAnimationFrame(renderLoop);
-    }
-    
     // 启动循环
     if (typeof requestAnimationFrame !== 'undefined') {
-        animationFrameId = requestAnimationFrame(renderLoop);
+        const loop = () => {
+            // 更新模型
+            updateModel();
+            
+            // 渲染模型
+            renderModel();
+            
+            // 继续循环
+            animationFrameId = requestAnimationFrame(loop);
+        };
+        
+        animationFrameId = requestAnimationFrame(loop);
         console.log('Rendering loop started');
     } else {
         console.error('requestAnimationFrame is not supported');
@@ -967,7 +1025,6 @@ window.loadModelSetting = loadModelSetting;
 window.loadTextures = loadTextures;
 window.loadMotions = loadMotions;
 window.loadExpressions = loadExpressions;
-window.renderLoop = renderLoop;
 window.updateModel = updateModel;
 window.renderModel = renderModel;
 window.setScale = setScale;
@@ -975,3 +1032,4 @@ window.setPosition = setPosition;
 window.startMotion = startMotion;
 window.setExpression = setExpression;
 window.setupTouchEventListeners = setupTouchEventListeners;
+window.releaseModel = releaseModel;
