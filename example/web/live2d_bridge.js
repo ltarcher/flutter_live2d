@@ -10,7 +10,12 @@ var cubismModel = null;
 var cubismMoc = null;
 var modelMatrix = null;
 var animationFrameId = null;
-var lastTime = null;
+var lastFrameTime = null;
+var motionManager = null;
+var eyeBlink = null;
+var breath = null;
+var physics = null;
+var pose = null;
 
 // 动作和表情相关
 var expressions = {};
@@ -194,6 +199,18 @@ function initLive2D() {
 
     // 初始化纹理管理器
     textureManager = new TextureManager();
+    
+    // 初始化动作管理器
+    try {
+        // 尝试创建motionManager实例
+        if (Live2DCubismFramework.CubismMotionManager) {
+            motionManager = new Live2DCubismFramework.CubismMotionManager();
+        } else {
+            console.warn('CubismMotionManager not found in Live2DCubismFramework');
+        }
+    } catch (e) {
+        console.error('Error creating motionManager:', e);
+    }
 
     console.log('Live2D initialized on Web platform');
     return Promise.resolve();
@@ -443,59 +460,90 @@ async function loadExpressions() {
 // 加载动作
 async function loadMotions() {
     try {
-        const motionPromises = [];
         motions = {}; // 重置动作对象
+        
+        // 检查 modelSetting 是否有必要的方法
+        if (!modelSetting) {
+            console.warn('modelSetting is not available, skipping motion loading');
+            return;
+        }
+        
+        // 检查是否有获取动作组数量的方法
+        if (typeof modelSetting.getMotionGroupCount !== 'function') {
+            console.warn('modelSetting.getMotionGroupCount is not a function, trying alternative approach');
+            
+            // 如果没有 getMotionGroupCount，尝试检查是否有预定义的动作组
+            // 这是一种兼容性处理方式
+            const commonGroups = ['idle', 'tap_body', 'pinch_in', 'pinch_out', 'shake', 'flick_head'];
+            
+            for (const groupName of commonGroups) {
+                if (typeof modelSetting.getMotionCount === 'function' && modelSetting.getMotionCount(groupName) > 0) {
+                    await loadMotionGroup(groupName);
+                }
+            }
+            
+            console.log('Processed motion groups using alternative approach');
+            return;
+        }
         
         // 使用 modelSetting 获取动作组数量
         const motionGroupCount = modelSetting.getMotionGroupCount();
-        console.log('Loading motions for', motionGroupCount, 'groups');
+        console.log('Processing', motionGroupCount, 'motion groups');
         
+        // 遍历所有动作组
         for (let i = 0; i < motionGroupCount; i++) {
-            // 使用 modelSetting 获取动作组名
+            // 获取动作组名称
             const groupName = modelSetting.getMotionGroupName(i);
-            console.log('Loading motion group:', groupName);
+            console.log('Processing motion group:', groupName);
             
-            // 使用 modelSetting 获取动作数量
-            const motionCount = modelSetting.getMotionCount(groupName);
-            
-            if (!motions[groupName]) {
-                motions[groupName] = [];
-            }
-            
-            for (let j = 0; j < motionCount; j++) {
-                // 使用 modelSetting 获取动作文件名
-                const motionFileName = modelSetting.getMotionFileName(groupName, j);
-                const motionPath = modelHomeDir + motionFileName;
-                const motionName = `${groupName}_${j}`;
-                console.log(`Loading motion: ${motionName} from ${motionPath}`);
-                
-                motionPromises.push(
-                    fetch(motionPath)
-                        .then(response => response.arrayBuffer())
-                        .then(arrayBuffer => {
-                            // 修复：使用正确的 Cubism SDK API
-                            const motion = Live2DCubismFramework.CubismMotion.create(arrayBuffer);
-                            if (!motions[groupName]) {
-                                motions[groupName] = [];
-                            }
-                            motions[groupName][j] = motion;
-                            console.log(`Loaded motion: ${motionName}`);
-                        })
-                        .catch(e => {
-                            console.error(`Error loading motion ${motionName}:`, e);
-                        })
-                );
-            }
+            await loadMotionGroup(groupName);
         }
         
-        try {
-            await Promise.all(motionPromises);
-            console.log(`Loaded motions for ${Object.keys(motions).length} groups`);
-        } catch (e) {
-            console.error('Error loading motions:', e);
-        }
+        console.log('Processed', Object.keys(motions).length, 'motion groups');
     } catch (e) {
         console.error('Error processing motion groups:', e);
+        // 不抛出错误，让其他部分继续执行
+    }
+}
+
+// 加载单个动作组
+async function loadMotionGroup(groupName) {
+    try {
+        // 获取该组的动作数量
+        const motionCount = modelSetting.getMotionCount(groupName);
+        motions[groupName] = [];
+        
+        // 加载该组的所有动作
+        for (let j = 0; j < motionCount; j++) {
+            const motionFileName = modelSetting.getMotionFileName(groupName, j);
+            const motionPath = modelHomeDir + motionFileName;
+            
+            try {
+                const response = await fetch(motionPath);
+                const arrayBuffer = await response.arrayBuffer();
+                
+                // 创建动作对象
+                // 检查不同的创建方法
+                let motion;
+                if (Live2DCubismFramework.CubismMotion && 
+                    typeof Live2DCubismFramework.CubismMotion.create === 'function') {
+                    motion = Live2DCubismFramework.CubismMotion.create(arrayBuffer);
+                } else if (typeof Live2DCubismFramework.ACubismMotion !== 'undefined' &&
+                          typeof Live2DCubismFramework.ACubismMotion.create === 'function') {
+                    motion = Live2DCubismFramework.ACubismMotion.create(arrayBuffer);
+                } else {
+                    console.warn('No suitable motion creation method found');
+                    continue;
+                }
+                
+                motions[groupName].push(motion);
+                console.log(`Loaded motion ${j} for group ${groupName}:`, motionPath);
+            } catch (e) {
+                console.error(`Error loading motion ${j} for group ${groupName}:`, e);
+            }
+        }
+    } catch (e) {
+        console.error(`Error processing motion group ${groupName}:`, e);
     }
 }
 
@@ -521,6 +569,108 @@ async function loadModel(modelPath) {
         
         // 创建模型
         await createModel();
+        
+        // 初始化眼部眨眼功能
+        try {
+            // 尝试多种方式创建eyeBlink对象
+            if (Live2DCubismFramework.CubismEyeBlink && 
+                typeof Live2DCubismFramework.CubismEyeBlink.create === 'function') {
+                eyeBlink = Live2DCubismFramework.CubismEyeBlink.create(modelSetting);
+                console.log('EyeBlink created successfully');
+            } else {
+                console.warn('CubismEyeBlink not available or create method not found');
+            }
+        } catch (e) {
+            console.warn('Failed to create eyeBlink:', e);
+        }
+        
+        // 初始化呼吸功能
+        try {
+            if (Live2DCubismFramework.CubismBreath && 
+                typeof Live2DCubismFramework.CubismBreath.create === 'function') {
+                breath = Live2DCubismFramework.CubismBreath.create();
+                
+                // 添加呼吸参数
+                if (breath && cubismModel) {
+                    const breathParameters = [];
+                    
+                    // 尝试不同的参数ID获取方式
+                    let angleXId, angleYId, angleZId, bodyAngleXId, breastId;
+                    
+                    if (Live2DCubismFramework.CubismFramework && 
+                        typeof Live2DCubismFramework.CubismFramework.getIdManager === 'function') {
+                        const idManager = Live2DCubismFramework.CubismFramework.getIdManager();
+                        if (idManager && typeof idManager.getId === 'function') {
+                            angleXId = idManager.getId('ParamAngleX');
+                            angleYId = idManager.getId('ParamAngleY');
+                            angleZId = idManager.getId('ParamAngleZ');
+                            bodyAngleXId = idManager.getId('ParamBodyAngleX');
+                            breastId = idManager.getId('ParamBreath');
+                        }
+                    }
+                    
+                    // 添加呼吸参数
+                    if (angleXId) breathParameters.push({ parameterId: angleXId, offset: 0.0, peak: 15.0, cycle: 6.5345, weight: 0.5 });
+                    if (angleYId) breathParameters.push({ parameterId: angleYId, offset: 0.0, peak: 8.0, cycle: 3.5345, weight: 0.5 });
+                    if (angleZId) breathParameters.push({ parameterId: angleZId, offset: 0.0, peak: 10.0, cycle: 5.5345, weight: 0.5 });
+                    if (bodyAngleXId) breathParameters.push({ parameterId: bodyAngleXId, offset: 0.0, peak: 4.0, cycle: 15.5345, weight: 0.5 });
+                    if (breastId) breathParameters.push({ parameterId: breastId, offset: 0.5, peak: 0.5, cycle: 3.2345, weight: 0.5 });
+                    
+                    if (breathParameters.length > 0 && typeof breath.setParameters === 'function') {
+                        breath.setParameters(breathParameters);
+                    }
+                }
+                console.log('Breath created successfully');
+            } else {
+                console.warn('CubismBreath not available or create method not found');
+            }
+        } catch (e) {
+            console.warn('Failed to create breath:', e);
+        }
+        
+        // 初始化物理运算
+        try {
+            if (modelSetting) {
+                const physicsFileName = modelSetting.getPhysicsFileName();
+                if (physicsFileName) {
+                    const physicsPath = modelHomeDir + physicsFileName;
+                    const response = await fetch(physicsPath);
+                    const arrayBuffer = await response.arrayBuffer();
+                    
+                    if (Live2DCubismFramework.CubismPhysics && 
+                        typeof Live2DCubismFramework.CubismPhysics.create === 'function') {
+                        physics = Live2DCubismFramework.CubismPhysics.create(arrayBuffer);
+                        console.log('Physics created successfully');
+                    } else {
+                        console.warn('CubismPhysics not available or create method not found');
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to create physics:', e);
+        }
+        
+        // 初始化姿势
+        try {
+            if (modelSetting) {
+                const poseFileName = modelSetting.getPoseFileName();
+                if (poseFileName) {
+                    const posePath = modelHomeDir + poseFileName;
+                    const response = await fetch(posePath);
+                    const arrayBuffer = await response.arrayBuffer();
+                    
+                    if (Live2DCubismFramework.CubismPose && 
+                        typeof Live2DCubismFramework.CubismPose.create === 'function') {
+                        pose = Live2DCubismFramework.CubismPose.create(arrayBuffer);
+                        console.log('Pose created successfully');
+                    } else {
+                        console.warn('CubismPose not available or create method not found');
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to create pose:', e);
+        }
         
         // 加载纹理
         await loadTextures();
@@ -577,15 +727,19 @@ function updateModel() {
         // 更新参数
         if (cubismModel) {
             // 更新动作
-            if (motionManager && typeof motionManager.isFinished === 'function') {
-                if (!motionManager.isFinished()) {
-                    if (typeof motionManager.updateMotion === 'function') {
-                        motionManager.updateMotion(cubismModel, deltaTime / 1000.0);
+            if (motionManager) {
+                if (typeof motionManager.isFinished === 'function') {
+                    if (!motionManager.isFinished()) {
+                        if (typeof motionManager.updateMotion === 'function') {
+                            motionManager.updateMotion(cubismModel, deltaTime / 1000.0);
+                        }
                     }
+                } else if (typeof motionManager.updateMotion === 'function') {
+                    // 直接更新动作而不检查是否完成
+                    motionManager.updateMotion(cubismModel, deltaTime / 1000.0);
+                } else {
+                    console.warn('motionManager.updateMotion is not a function');
                 }
-            } else if (motionManager && typeof motionManager.updateMotion === 'function') {
-                // 直接更新动作而不检查是否完成
-                motionManager.updateMotion(cubismModel, deltaTime / 1000.0);
             }
             
             // 保存参数
@@ -593,6 +747,8 @@ function updateModel() {
                 cubismModel.saveParameters();
             } else if (cubismModel.model && typeof cubismModel.model.saveParameters === 'function') {
                 cubismModel.model.saveParameters();
+            } else {
+                console.warn('cubismModel.saveParameters is not a function, skipping');
             }
             
             // 眨眼
@@ -608,6 +764,8 @@ function updateModel() {
             // 物理运算
             if (physics && typeof physics.evaluate === 'function') {
                 physics.evaluate(cubismModel, deltaTime / 1000.0);
+            } else if (physics && typeof physics.updateParameters === 'function') {
+                physics.updateParameters(cubismModel, deltaTime / 1000.0);
             }
             
             // 姿势
@@ -620,6 +778,8 @@ function updateModel() {
                 cubismModel.update();
             } else if (cubismModel.model && typeof cubismModel.model.update === 'function') {
                 cubismModel.model.update();
+            } else {
+                console.warn('cubismModel.update is not a function');
             }
         }
     } catch (e) {
@@ -641,40 +801,18 @@ function renderModel() {
         // 更新视口
         gl.viewport(0, 0, canvas.width, canvas.height);
         
-        // 设置投影矩阵
-        const projection = new Live2DCubismFramework.CubismMatrix44();
-        projection.multiplyByMatrix(modelMatrix);
-        
         // 渲染模型
         if (renderer) {
-            // 尝试不同的渲染方法，按优先级排序
-            if (typeof renderer.setMvpMatrix === 'function' && typeof renderer.drawModel === 'function') {
-                // 新版本SDK：先设置MVP矩阵，再绘制模型
-                renderer.setMvpMatrix(projection);
-                renderer.setModel(cubismModel); // 确保模型被正确设置
-                renderer.drawModel();
-            } 
-            else if (typeof renderer.setProjection === 'function' && typeof renderer.setModel === 'function' && typeof renderer.draw === 'function') {
-                // 中间版本SDK
-                renderer.setProjection(projection);
-                renderer.setModel(cubismModel);
-                renderer.draw();
-            } 
-            else if (typeof renderer.render === 'function') {
-                // 老版本SDK直接渲染
+            // 检查不同的渲染方法
+            if (typeof renderer.render === 'function') {
                 renderer.render(cubismModel);
-            } 
-            else if (typeof renderer.doDrawModel === 'function') {
-                // 备用方法
-                renderer.setModel(cubismModel);
+            } else if (typeof renderer.doDrawModel === 'function') {
                 renderer.doDrawModel();
-            } 
-            else if (typeof renderer.drawModel === 'function') {
-                // 最后尝试
-                renderer.setModel(cubismModel);
+            } else if (typeof renderer.drawModel === 'function') {
                 renderer.drawModel();
-            } 
-            else {
+            } else if (typeof renderer.draw === 'function') {
+                renderer.draw(cubismModel);
+            } else {
                 console.warn('No valid render function found');
             }
         }
