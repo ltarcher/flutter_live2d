@@ -31,8 +31,18 @@
 
   <title>flutter_live2d_example</title>
   <link rel="manifest" href="manifest.json">
+  
+  <!-- Live2D Core Script -->
+  <script src="live2dcubismcore.min.js"></script>
+  <!-- Live2D Framework Script -->
+  <script src="live2dcubismframework.js"></script>
+  <!-- Live2D Bridge Script -->
+  <script src="live2d_bridge.js"></script>
 </head>
 <body>
+  <!-- Canvas for Live2D model -->
+  <canvas id="live2d-canvas" width="800" height="600" style="border: 1px solid #ccc; margin: 10px auto; display: block;"></canvas>
+  
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

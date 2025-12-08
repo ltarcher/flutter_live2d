@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_live2d/flutter_live2d.dart';
@@ -6,103 +10,148 @@ void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Live2DDemo(),
-    );
-  }
+  State<MyApp> createState() => _MyAppState();
 }
 
-class Live2DDemo extends StatefulWidget {
-  @override
-  _Live2DDemoState createState() => _Live2DDemoState();
-}
+class _MyAppState extends State<MyApp> {
+  String _platformVersion = 'Unknown';
+  bool _isInitialized = false;
 
-class _Live2DDemoState extends State<Live2DDemo> {
   @override
   void initState() {
     super.initState();
-    print("Live2DDemo: initState");
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      print("Live2DDemo: postFrameCallback");
-      _initLive2D();
+    initPlatformState();
+  }
+
+  // Platform messages are asynchronous, so we initialize in an async method.
+  Future<void> initPlatformState() async {
+    String platformVersion;
+    // Platform messages may fail, so we use a try/catch PlatformException.
+    // We also handle the message potentially returning null.
+    try {
+      platformVersion = (await FlutterLive2d.getPlatformVersion()) ?? 'Unknown platform version';
+    } on PlatformException {
+      platformVersion = 'Failed to get platform version.';
+    }
+
+    // If the widget was removed from the tree while the asynchronous platform
+    // message was in flight, we want to discard the reply rather than calling
+    // setState to update our non-existent appearance.
+    if (!mounted) return;
+
+    setState(() {
+      _platformVersion = platformVersion;
     });
+
+    // 初始化Live2D
+    await _initLive2D();
   }
 
   Future<void> _initLive2D() async {
     try {
-      print("Live2DDemo: Starting initialization");
       await FlutterLive2d.initLive2d();
-      print("Live2DDemo: Live2D initialized");
-
       await Future.delayed(Duration(milliseconds: 500));
-      print("Live2DDemo: Delay completed");
-
       await FlutterLive2d.loadModel("assets/live2d/Haru/Haru.model3.json");
-      print("Live2DDemo: Model loaded");
-    } catch (e, stackTrace) {
-      print("Live2DDemo: Initialization failed");
-      print("Live2DDemo: Error: $e");
-      print("Live2DDemo: Stack trace: $stackTrace");
+      
+      if (mounted) {
+        setState(() {
+          _isInitialized = true;
+        });
+      }
+    } catch (e) {
+      print("初始化失败: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    print("Live2DDemo: Building widget");
-    return Scaffold(
-      appBar: AppBar(title: Text('Live2D Demo')),
-      body: Stack(
-        children: [
-          // Live2D视图
-          Center(
-            child: Container(
-              width: MediaQuery.of(context).size.width,
-              height: MediaQuery.of(context).size.height * 0.8,
-              color: Colors.grey[200],
-              child: AndroidView(
-                viewType: 'live2d_view',
-                creationParams: <String, dynamic>{},
-                creationParamsCodec: const StandardMessageCodec(),
-                onPlatformViewCreated: (int id) {
-                  print("Live2DDemo: Platform view created with id: $id");
-                },
+    return MaterialApp(
+      home: Scaffold(
+        appBar: AppBar(
+          title: const Text('Plugin example app'),
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('Running on: $_platformVersion\n'),
+              SizedBox(height: 20),
+              Text('Live2D Demo (Web and Mobile)'),
+              SizedBox(height: 20),
+              if (!kIsWeb && (Platform.isAndroid || Platform.isIOS))
+                // 移动端使用原生视图
+                Container(
+                  width: MediaQuery.of(context).size.width,
+                  height: MediaQuery.of(context).size.height * 0.6,
+                  color: Colors.grey[200],
+                  child: AndroidView(
+                    viewType: 'live2d_view',
+                    creationParams: <String, dynamic>{},
+                    creationParamsCodec: const StandardMessageCodec(),
+                  ),
+                )
+              else
+                // Web端或其他平台显示替代内容
+                Container(
+                  width: MediaQuery.of(context).size.width,
+                  height: MediaQuery.of(context).size.height * 0.6,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (_isInitialized)
+                        Text(
+                          'Live2D Model Loaded Successfully!',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.green),
+                        )
+                      else
+                        Text(
+                          'Loading Live2D Model...',
+                          style: TextStyle(fontSize: 16, color: Colors.orange),
+                        ),
+                      SizedBox(height: 20),
+                      Text(
+                        'The Live2D model should appear in the canvas above.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                      ),
+                      SizedBox(height: 10),
+                      Text(
+                        'Use the buttons below to control the model.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                ),
+              SizedBox(height: 20),
+              Wrap(
+                spacing: 10,
+                children: [
+                  ElevatedButton(
+                    onPressed: () => FlutterLive2d.startMotion("idle", 0),
+                    child: Text('待机动作'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => FlutterLive2d.setExpression("smile"),
+                    child: Text('微笑表情'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => FlutterLive2d.setScale(1.5),
+                    child: Text('放大'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => FlutterLive2d.setScale(1.0),
+                    child: Text('还原'),
+                  ),
+                ],
               ),
-            ),
+            ],
           ),
-
-          // 控制按钮
-          Positioned(
-            bottom: 20,
-            left: 0,
-            right: 0,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                ElevatedButton(
-                  onPressed: () => FlutterLive2d.startMotion("idle", 0),
-                  child: Text('待机动作'),
-                ),
-                ElevatedButton(
-                  onPressed: () => FlutterLive2d.setExpression("smile"),
-                  child: Text('微笑表情'),
-                ),
-                ElevatedButton(
-                  onPressed: () => FlutterLive2d.setScale(1.5),
-                  child: Text('放大'),
-                ),
-                ElevatedButton(
-                  onPressed: () => FlutterLive2d.setScale(1.0),
-                  child: Text('还原'),
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

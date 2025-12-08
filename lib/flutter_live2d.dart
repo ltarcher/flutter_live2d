@@ -1,6 +1,10 @@
 import 'flutter_live2d_platform_interface.dart';
 
 class FlutterLive2d {
+  static Future<String?> getPlatformVersion() {
+    return FlutterLive2dPlatform.instance.getPlatformVersion();
+  }
+
   static Future<void> initLive2d() {
     return FlutterLive2dPlatform.instance.initLive2d();
   }

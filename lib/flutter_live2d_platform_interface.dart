@@ -1,6 +1,8 @@
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_live2d_method_channel.dart';
+import 'flutter_live2d_web.dart'
+    if (dart.library.html) 'flutter_live2d_web.dart';
 
 abstract class FlutterLive2dPlatform extends PlatformInterface {
   /// Constructs a FlutterLive2dPlatform.
@@ -21,6 +23,10 @@ abstract class FlutterLive2dPlatform extends PlatformInterface {
   static set instance(FlutterLive2dPlatform instance) {
     PlatformInterface.verifyToken(instance, _token);
     _instance = instance;
+  }
+
+  Future<String?> getPlatformVersion() {
+    throw UnimplementedError('getPlatformVersion() has not been implemented.');
   }
 
   Future<void> initLive2d() {
