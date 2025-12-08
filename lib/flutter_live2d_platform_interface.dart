@@ -1,8 +1,9 @@
+import 'package:flutter/material.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_live2d_method_channel.dart';
 import 'flutter_live2d_web.dart'
-    if (dart.library.html) 'flutter_live2d_web.dart';
+  if (dart.library.html) 'flutter_live2d_web.dart';
 
 abstract class FlutterLive2dPlatform extends PlatformInterface {
   /// Constructs a FlutterLive2dPlatform.

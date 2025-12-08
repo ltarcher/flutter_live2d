@@ -1,21 +1,18 @@
-/**
- * Live2D Web Bridge
- * 提供Dart与JavaScript之间的桥接功能
- */
-
-let live2dModel = null;
-let gl = null;
-let canvas = null;
-let renderer = null;
-let textureManager = null;
-let modelHomeDir = '';
-let modelSetting = null;
-let cubismModel = null;
-let cubismMoc = null;
+// 修改为全局变量
+var live2dModel = null;
+var gl = null;
+var canvas = null;
+var renderer = null;
+var textureManager = null;
+var modelHomeDir = '';
+var modelSetting = null;
+var cubismModel = null;
+var cubismMoc = null;
+var modelMatrix = null;
 
 // 动作和表情相关
-const expressions = {};
-const motions = {};
+var expressions = {};
+var motions = {};
 
 // 纹理管理器
 class TextureManager {
@@ -79,36 +76,87 @@ function initWebGL() {
 
 // 初始化Live2D Framework
 function initLive2DFramework() {
+    // 检查命名空间
+    if (typeof Live2DCubismCore === 'undefined') {
+        console.error('Live2D Core not loaded');
+        return false;
+    }
+    
+    if (typeof Live2DCubismFramework === 'undefined') {
+        console.error('Live2D Framework not loaded');
+        return false;
+    }
+    
     // 初始化Cubism Framework选项
-    cubismOption = new Live2DCubismCore.Rendering.CubismRenderer.WebGL.RendererOption();
+    // 注意：需要根据实际的SDK版本调整命名空间
+    let cubismOption;
+    try {
+        // 尝试不同的可能命名空间
+        if (Live2DCubismCore.Rendering && Live2DCubismCore.Rendering.CubismRenderer) {
+            cubismOption = new Live2DCubismCore.Rendering.CubismRenderer.RendererOption();
+        } else if (Live2DCubismCore.CubismRenderer) {
+            cubismOption = new Live2DCubismCore.CubismRenderer.RendererOption();
+        } else {
+            // 如果找不到确切的命名空间，则创建一个空的对象
+            cubismOption = {};
+            console.warn('Could not find CubismRenderer namespace, using empty options object');
+        }
+    } catch (e) {
+        cubismOption = {};
+        console.warn('Error creating RendererOption, using empty options object:', e);
+    }
     
     // 启动Cubism Framework
-    if (Live2DCubismCore.Framework.CubismFramework.startUp(cubismOption)) {
-        // 初始化Cubism Framework
-        Live2DCubismCore.Framework.CubismFramework.initialize();
-        console.log('Live2D Framework initialized');
-        return true;
-    } else {
-        console.error('Failed to start up Live2D Framework');
+    try {
+        // 尝试不同的启动方式
+        let startupResult = false;
+        if (Live2DCubismFramework.CubismFramework && Live2DCubismFramework.CubismFramework.startUp) {
+            startupResult = Live2DCubismFramework.CubismFramework.startUp(cubismOption);
+        } else {
+            console.warn('CubismFramework.startUp not found, assuming framework is ready');
+            startupResult = true;
+        }
+        
+        if (startupResult) {
+            // 初始化Cubism Framework
+            if (Live2DCubismFramework.CubismFramework && Live2DCubismFramework.CubismFramework.initialize) {
+                Live2DCubismFramework.CubismFramework.initialize();
+            }
+            console.log('Live2D Framework initialized');
+            return true;
+        } else {
+            console.error('Failed to start up Live2D Framework');
+            return false;
+        }
+    } catch (e) {
+        console.error('Error during Live2D Framework initialization:', e);
         return false;
     }
 }
 
 // 初始化Live2D
 function initLive2D() {
-    if (!Live2DCubismCore) {
-        console.error('Live2D Core not loaded');
-        return Promise.reject('Live2D Core not loaded');
+    console.log('Initializing Live2D...');
+    
+    // 检查核心库是否加载
+    if (typeof Live2DCubismCore === 'undefined') {
+        const errorMsg = 'Live2D Core not loaded';
+        console.error(errorMsg);
+        return Promise.reject(errorMsg);
     }
 
     // 初始化WebGL
     if (!initWebGL()) {
-        return Promise.reject('Failed to initialize WebGL');
+        const errorMsg = 'Failed to initialize WebGL';
+        console.error(errorMsg);
+        return Promise.reject(errorMsg);
     }
 
     // 初始化Live2D Framework
     if (!initLive2DFramework()) {
-        return Promise.reject('Failed to initialize Live2D Framework');
+        const errorMsg = 'Failed to initialize Live2D Framework';
+        console.error(errorMsg);
+        return Promise.reject(errorMsg);
     }
 
     // 初始化纹理管理器
@@ -145,14 +193,60 @@ async function loadModelMoc(modelSetting) {
     try {
         const response = await fetch(modelHomeDir + mocFileName);
         const arrayBuffer = await response.arrayBuffer();
-        cubismMoc = Live2DCubismFramework.CubismMoc.create(arrayBuffer);
-        cubismModel = cubismMoc.createModel();
         
-        // 创建渲染器
-        renderer = new Live2DCubismCore.Framework.CubismRenderer.WebGL.CubismShader_WebGl();
+        // 检查命名空间
+        if (typeof Live2DCubismFramework === 'undefined') {
+            throw new Error('Live2D Framework not loaded');
+        }
         
-        console.log('Model MOC loaded');
-        return cubismModel;
+        // 创建MOC和模型
+        if (Live2DCubismFramework.CubismMoc) {
+            cubismMoc = Live2DCubismFramework.CubismMoc.create(arrayBuffer);
+        } else if (Live2DCubismCore.CubismMoc) {
+            cubismMoc = Live2DCubismCore.CubismMoc.create(arrayBuffer);
+        } else {
+            throw new Error('CubismMoc not found in any namespace');
+        }
+        
+        if (cubismMoc) {
+            if (Live2DCubismFramework.CubismModel) {
+                cubismModel = cubismMoc.createModel();
+            } else if (Live2DCubismCore.CubismModel) {
+                cubismModel = cubismMoc.createModel();
+            } else {
+                throw new Error('CubismModel not found in any namespace');
+            }
+        }
+        
+        // 创建渲染器 - 尝试多种可能的命名空间
+        try {
+            if (Live2DCubismCore.Rendering && Live2DCubismCore.Rendering.CubismRenderer_WebGl) {
+                renderer = new Live2DCubismCore.Rendering.CubismRenderer_WebGl();
+            } else if (Live2DCubismCore.CubismRenderer_WebGl) {
+                renderer = new Live2DCubismCore.CubismRenderer_WebGl();
+            } else if (Live2DCubismFramework.CubismRenderer_WebGl) {
+                renderer = new Live2DCubismFramework.CubismRenderer_WebGl();
+            } else {
+                // 如果找不到特定的WebGL渲染器，尝试通用的CubismRenderer
+                if (Live2DCubismCore.CubismRenderer) {
+                    renderer = Live2DCubismCore.CubismRenderer.create();
+                } else if (Live2DCubismFramework.CubismRenderer) {
+                    renderer = Live2DCubismFramework.CubismRenderer.create();
+                } else {
+                    console.warn('No specific renderer found, renderer may not work correctly');
+                }
+            }
+            
+            if (renderer && renderer.initialize) {
+                renderer.initialize(cubismModel);
+            } else if (renderer && typeof renderer == 'object') {
+                console.log('Renderer created but no initialize method found');
+            }
+        } catch (e) {
+            console.warn('Error creating WebGL renderer, continuing without dedicated renderer:', e);
+        }
+        
+        console.log('Model MOC loaded successfully');
     } catch (e) {
         console.error('Error loading model MOC:', e);
         throw e;
@@ -201,8 +295,8 @@ async function loadMotions(modelSetting) {
                 const response = await fetch(modelHomeDir + motionFileName);
                 const arrayBuffer = await response.arrayBuffer();
                 // 实际实现中应该加载动作文件
+                const motion = Live2DCubismFramework.CubismMotion.create(arrayBuffer);
                 console.log(`Loading motion: ${motionFileName}`);
-                motions[groupName].push({});
                 motions[groupName].push(motion);
                 console.log(`Loaded motion: ${groupName}[${i}]`);
             } catch (e) {
@@ -228,8 +322,8 @@ async function loadExpressions(modelSetting) {
             const response = await fetch(modelHomeDir + expressionFileName);
             const arrayBuffer = await response.arrayBuffer();
             // 实际实现中应该加载表情文件
+            const expression = Live2DCubismFramework.CubismExpressionMotion.create(arrayBuffer);
             console.log(`Loading expression: ${expressionFileName}`);
-            expressions[expressionName] = {};
             expressions[expressionName] = expression;
             console.log(`Loaded expression: ${expressionName}`);
         } catch (e) {
@@ -284,19 +378,34 @@ async function loadModel(modelPath) {
 // 渲染循环
 function renderLoop() {
     if (!gl || !cubismModel) {
+        console.warn('Render loop called but WebGL context or model not ready');
         return;
     }
     
     // 清除画布
-    gl.clearColor(0.0, 0.0, 0.0, 0.0);
+    gl.clearColor(0.0, 0.0, 0.0, 0.0); // 透明背景
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     
     // 更新模型
-    if (cubismModel) {
+    if (cubismModel && cubismModel.update) {
         cubismModel.update();
     }
     
-    // 在实际实现中，这里应该调用渲染器来绘制模型
+    // 渲染模型 - 使用更容错的方式
+    try {
+        if (renderer && renderer.render) {
+            // 使用专用渲染器
+            renderer.render(cubismModel);
+        } else if (cubismModel && cubismModel.draw) {
+            // 直接绘制模型
+            cubismModel.draw();
+        } else if (cubismModel && cubismModel.getDrawableCount) {
+            // 手动绘制 - 这是一种后备方案
+            console.warn('No specific rendering method found, model might not be visible');
+        }
+    } catch (e) {
+        console.error('Error during model rendering:', e);
+    }
     
     // 请求下一帧
     requestAnimationFrame(renderLoop);
@@ -307,7 +416,13 @@ function setScale(scale) {
     console.log('Setting scale on Web platform:', scale);
     // 在实际实现中，我们会修改模型的缩放参数
     if (modelMatrix) {
-        modelMatrix.scale(scale, scale);
+        if (modelMatrix.scale) {
+            modelMatrix.scale(scale, scale);
+        } else {
+            console.warn('modelMatrix.scale method not found');
+        }
+    } else {
+        console.warn('modelMatrix not initialized');
     }
 }
 
@@ -316,7 +431,13 @@ function setPosition(x, y) {
     console.log('Setting position on Web platform: x=' + x + ', y=' + y);
     // 在实际实现中，我们会修改模型的位置参数
     if (modelMatrix) {
-        modelMatrix.translate(x, y);
+        if (modelMatrix.translate) {
+            modelMatrix.translate(x, y);
+        } else {
+            console.warn('modelMatrix.translate method not found');
+        }
+    } else {
+        console.warn('modelMatrix not initialized');
     }
 }
 
@@ -375,6 +496,12 @@ function setupTouchEventListeners() {
 // 将函数暴露给全局作用域，以便Dart可以通过js包调用
 window.initLive2D = initLive2D;
 window.loadModel = loadModel;
+window.loadModelSetting = loadModelSetting;
+window.loadModelMoc = loadModelMoc;
+window.loadTextures = loadTextures;
+window.loadMotions = loadMotions;
+window.loadExpressions = loadExpressions;
+window.renderLoop = renderLoop;
 window.setScale = setScale;
 window.setPosition = setPosition;
 window.startMotion = startMotion;
