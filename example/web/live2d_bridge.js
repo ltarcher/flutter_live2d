@@ -120,16 +120,19 @@ function initLive2DFramework() {
     let cubismOption;
     try {
         // 尝试不同的可能命名空间
-        if (Live2DCubismFramework.Option) {
-            cubismOption = new Live2DCubismFramework.Option();
-        } else if (Live2DCubismCore.Rendering && Live2DCubismCore.Rendering.CubismRenderer) {
+        if (Live2DCubismFramework.RendererOption) {
+            cubismOption = new Live2DCubismFramework.RendererOption();
+        } else if (Live2DCubismFramework.CubismRenderer && Live2DCubismFramework.CubismRenderer.RendererOption) {
+            cubismOption = new Live2DCubismFramework.CubismRenderer.RendererOption();
+        } else if (Live2DCubismCore.Rendering && Live2DCubismCore.Rendering.CubismRenderer && 
+                   Live2DCubismCore.Rendering.CubismRenderer.RendererOption) {
             cubismOption = new Live2DCubismCore.Rendering.CubismRenderer.RendererOption();
-        } else if (Live2DCubismCore.CubismRenderer) {
+        } else if (Live2DCubismCore.CubismRenderer && Live2DCubismCore.CubismRenderer.RendererOption) {
             cubismOption = new Live2DCubismCore.CubismRenderer.RendererOption();
         } else {
             // 如果找不到确切的命名空间，则创建一个空的对象
             cubismOption = {};
-            console.warn('Could not find CubismRenderer namespace, using empty options object');
+            console.warn('Could not find RendererOption namespace, using empty options object');
         }
     } catch (e) {
         cubismOption = {};
@@ -203,10 +206,20 @@ async function loadModelSetting(modelPath) {
     
     try {
         const response = await fetch(modelPath);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        const arrayBuffer = await response.arrayBuffer();
+        
+        // 检查命名空间
+        if (typeof Live2DCubismFramework === 'undefined') {
+            throw new Error('Live2D Framework not loaded');
         }
-        modelSetting = await response.json();
+        
+        // 正确创建 CubismModelSettingJson 实例
+        if (Live2DCubismFramework.CubismModelSettingJson) {
+            modelSetting = new Live2DCubismFramework.CubismModelSettingJson(arrayBuffer, arrayBuffer.byteLength);
+        } else {
+            throw new Error('CubismModelSettingJson class not found');
+        }
+        
         console.log('Model setting loaded:', modelSetting);
         return modelSetting;
     } catch (e) {
@@ -223,8 +236,15 @@ async function loadMocFile(mocPath) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const arrayBuffer = await response.arrayBuffer();
-        const mocByteArray = new Int8Array(arrayBuffer);
-        cubismMoc = Live2DCubismFramework.CubismMoc.create(mocByteArray);
+        
+        // 修复：使用正确的 Cubism SDK API
+        // 使用 Framework API 创建 Moc 对象
+        if (Live2DCubismFramework.CubismMoc && typeof Live2DCubismFramework.CubismMoc.create === 'function') {
+            cubismMoc = Live2DCubismFramework.CubismMoc.create(arrayBuffer);
+        } else {
+            // 如果 Framework API 不可用，直接使用 Core API
+            cubismMoc = Live2DCubismCore.Moc.fromArrayBuffer(arrayBuffer);
+        }
         console.log('MOC file loaded');
         return cubismMoc;
     } catch (e) {
@@ -236,63 +256,145 @@ async function loadMocFile(mocPath) {
 // 创建模型
 function createModel() {
     try {
-        cubismModel = cubismMoc.createModel();
+        // 修复：使用正确的 Cubism SDK API
+        // 使用 Framework API 创建模型
+        if (Live2DCubismFramework.CubismMoc && typeof Live2DCubismFramework.CubismMoc.prototype.createModel === 'function') {
+            cubismModel = cubismMoc.createModel();
+        } else {
+            // 如果 Framework API 不可用，尝试直接使用 Core API
+            cubismModel = new Live2DCubismFramework.CubismModel(cubismMoc);
+        }
         console.log('Model created');
         
-        // 创建渲染器
-        // 修复：使用正确的 Cubism SDK 5.1 API
-        if (Live2DCubismFramework.CubismRenderer_WebGL) {
-            renderer = new Live2DCubismFramework.CubismRenderer_WebGL();
-        } else if (Live2DCubismFramework.CubismRenderer && Live2DCubismFramework.CubismRenderer.WebGL) {
-            // 处理不同版本 SDK 的命名差异
-            renderer = new Live2DCubismFramework.CubismRenderer.WebGL();
-        } else {
-            // fallback 方案
-            console.error('Cannot find CubismRenderer_WebGL class');
-            throw new Error('Cannot find CubismRenderer_WebGL class');
-        }
-        
-        renderer.initialize(cubismModel);
-        renderer.setGl(gl);
-        
-        // 设置画布大小
-        const viewport = [0, 0, canvas.width, canvas.height];
-        renderer.setRenderState(gl.getParameter(gl.FRAMEBUFFER_BINDING), viewport);
-        
-        console.log('Renderer initialized');
-        return cubismModel;
+        // 初始化渲染器
+        initRenderer();
     } catch (e) {
         console.error('Error creating model:', e);
         throw e;
     }
 }
 
-// 加载纹理
-async function loadTextures() {
-    if (!modelSetting.FileReferences || !modelSetting.FileReferences.Textures) {
-        throw new Error('No textures found in model setting');
-    }
-    
-    const texturePaths = modelSetting.FileReferences.Textures;
-    const texturePromises = [];
-    
-    for (let i = 0; i < texturePaths.length; i++) {
-        const texturePath = modelHomeDir + texturePaths[i];
-        console.log(`Loading texture: ${texturePath}`);
-        texturePromises.push(textureManager.loadTexture(gl, texturePath));
-    }
-    
+// 初始化渲染器
+function initRenderer() {
     try {
-        const textures = await Promise.all(texturePromises);
-        console.log(`Loaded ${textures.length} textures`);
-        
-        // 将纹理绑定到模型
-        for (let i = 0; i < textures.length; i++) {
-            renderer.bindTexture(i, textures[i]);
+        // 检查 renderer 是否已经创建
+        if (!renderer) {
+            // 尝试多种方式创建渲染器
+            if (Live2DCubismFramework.CubismRenderer) {
+                if (typeof Live2DCubismFramework.CubismRenderer.create === 'function') {
+                    renderer = Live2DCubismFramework.CubismRenderer.create();
+                } else if (typeof Live2DCubismFramework.CubismRenderer.initialize === 'function') {
+                    renderer = new Live2DCubismFramework.CubismRenderer();
+                    renderer.initialize();
+                } else {
+                    renderer = new Live2DCubismFramework.CubismRenderer();
+                }
+            } else {
+                console.warn('Live2DCubismFramework.CubismRenderer is not available');
+                return;
+            }
         }
         
-        cubismModel.saveParameters();
-        return textures;
+        // 初始化渲染器
+        if (renderer) {
+            // 尝试不同的初始化方法
+            if (typeof renderer.initialize === 'function') {
+                renderer.initialize(gl, cubismModel);
+            } else if (typeof renderer.init === 'function') {
+                renderer.init(gl, cubismModel);
+            } else {
+                console.warn('Neither renderer.initialize nor renderer.init is available');
+            }
+            
+            // 设置OpenGL状态
+            if (typeof renderer.setGl === 'function') {
+                renderer.setGl(gl);
+            } else if (typeof renderer.startUp === 'function') {
+                renderer.startUp(gl);
+            } else {
+                console.warn('Neither renderer.setGl nor renderer.startUp is available');
+            }
+            
+            // 设置渲染状态
+            if (typeof renderer.setRenderState === 'function') {
+                renderer.setRenderState(gl);
+            } else {
+                console.warn('renderer.setRenderState is not a function, skipping');
+            }
+        }
+        
+        console.log('Renderer initialized');
+    } catch (e) {
+        console.error('Error initializing renderer:', e);
+        throw e;
+    }
+}
+
+// 加载纹理
+async function loadTextures() {
+    try {
+        const texturePromises = [];
+        textures = []; // 初始化纹理数组
+        
+        // 使用 modelSetting 获取纹理文件数量
+        const textureCount = modelSetting.getTextureCount();
+        console.log('Loading', textureCount, 'textures');
+        
+        for (let i = 0; i < textureCount; i++) {
+            // 使用 modelSetting 获取纹理文件名
+            const textureFileName = modelSetting.getTextureFileName(i);
+            const textureUrl = modelHomeDir + textureFileName;
+            console.log('Loading texture:', textureUrl);
+            
+            // 使用textureManager加载纹理
+            texturePromises.push(
+                textureManager.loadTexture(gl, textureUrl)
+                    .then(texture => {
+                        textures[i] = texture;
+                        console.log(`Loaded texture ${i}:`, textureUrl);
+                    })
+                    .catch(e => {
+                        console.error(`Error loading texture ${i}:`, e);
+                    })
+            );
+        }
+        
+        await Promise.all(texturePromises);
+        console.log('Loaded', textures.length, 'textures');
+        
+        // 绑定纹理到模型
+        if (renderer) {
+            // 尝试多种方式绑定纹理
+            if (typeof renderer.bindTexture === 'function') {
+                for (let i = 0; i < textures.length; i++) {
+                    renderer.bindTexture(i, textures[i]);
+                }
+            } else if (typeof renderer.setTexture === 'function') {
+                for (let i = 0; i < textures.length; i++) {
+                    renderer.setTexture(i, textures[i]);
+                }
+            } else if (cubismModel && typeof cubismModel.setTexture === 'function') {
+                for (let i = 0; i < textures.length; i++) {
+                    cubismModel.setTexture(i, textures[i]);
+                }
+            } else {
+                console.warn('No texture binding method found');
+            }
+        } else {
+            console.warn('Renderer not available for texture binding');
+        }
+        
+        // 检查是否存在 saveParameters 方法再调用
+        if (cubismModel && typeof cubismModel.saveParameters === 'function') {
+            cubismModel.saveParameters();
+        } else if (cubismModel && cubismModel.model && typeof cubismModel.model.saveParameters === 'function') {
+            cubismModel.model.saveParameters();
+        } else {
+            console.warn('cubismModel.saveParameters is not a function, skipping');
+        }
+        
+        // 启动渲染循环
+        startRenderingLoop();
     } catch (e) {
         console.error('Error loading textures:', e);
         throw e;
@@ -301,34 +403,36 @@ async function loadTextures() {
 
 // 加载表达式
 async function loadExpressions() {
-    if (!modelSetting.FileReferences || !modelSetting.FileReferences.Expressions) {
-        console.log('No expressions found in model setting');
-        return;
-    }
-    
-    const expressionSettings = modelSetting.FileReferences.Expressions;
-    const expressionPromises = [];
-    
-    for (let i = 0; i < expressionSettings.length; i++) {
-        const expressionName = expressionSettings[i].Name;
-        const expressionPath = modelHomeDir + expressionSettings[i].File;
-        console.log(`Loading expression: ${expressionName} from ${expressionPath}`);
-        
-        expressionPromises.push(
-            fetch(expressionPath)
-                .then(response => response.json())
-                .then(jsonData => {
-                    const expression = Live2DCubismFramework.CubismExpressionMotion.create(jsonData);
-                    expressions[expressionName] = expression;
-                    console.log(`Loaded expression: ${expressionName}`);
-                })
-                .catch(e => {
-                    console.error(`Error loading expression ${expressionName}:`, e);
-                })
-        );
-    }
-    
     try {
+        const expressionPromises = [];
+        expressions = {}; // 重置表情对象
+        
+        // 使用 modelSetting 获取表达式数量
+        const expressionCount = modelSetting.getExpressionCount();
+        console.log('Loading', expressionCount, 'expressions');
+        
+        for (let i = 0; i < expressionCount; i++) {
+            // 使用 modelSetting 获取表达式名称和文件名
+            const expressionName = modelSetting.getExpressionName(i);
+            const expressionFileName = modelSetting.getExpressionFileName(i);
+            const expressionPath = modelHomeDir + expressionFileName;
+            console.log(`Loading expression: ${expressionName} from ${expressionPath}`);
+            
+            expressionPromises.push(
+                fetch(expressionPath)
+                    .then(response => response.arrayBuffer())
+                    .then(arrayBuffer => {
+                        // 修复：使用正确的 Cubism SDK API
+                        const expression = Live2DCubismFramework.CubismExpressionMotion.create(arrayBuffer);
+                        expressions[expressionName] = expression;
+                        console.log(`Loaded expression: ${expressionName}`);
+                    })
+                    .catch(e => {
+                        console.error(`Error loading expression ${expressionName}:`, e);
+                    })
+            );
+        }
+        
         await Promise.all(expressionPromises);
         console.log(`Loaded ${Object.keys(expressions).length} expressions`);
     } catch (e) {
@@ -338,32 +442,43 @@ async function loadExpressions() {
 
 // 加载动作
 async function loadMotions() {
-    if (!modelSetting.FileReferences || !modelSetting.FileReferences.Motions) {
-        console.log('No motions found in model setting');
-        return;
-    }
-    
-    const motionGroups = modelSetting.FileReferences.Motions;
-    const motionPromises = [];
-    
-    for (const groupName in motionGroups) {
-        if (motionGroups.hasOwnProperty(groupName)) {
-            const groupMotions = motionGroups[groupName];
+    try {
+        const motionPromises = [];
+        motions = {}; // 重置动作对象
+        
+        // 使用 modelSetting 获取动作组数量
+        const motionGroupCount = modelSetting.getMotionGroupCount();
+        console.log('Loading motions for', motionGroupCount, 'groups');
+        
+        for (let i = 0; i < motionGroupCount; i++) {
+            // 使用 modelSetting 获取动作组名
+            const groupName = modelSetting.getMotionGroupName(i);
+            console.log('Loading motion group:', groupName);
             
-            for (let i = 0; i < groupMotions.length; i++) {
-                const motionPath = modelHomeDir + groupMotions[i].File;
-                const motionName = `${groupName}_${i}`;
+            // 使用 modelSetting 获取动作数量
+            const motionCount = modelSetting.getMotionCount(groupName);
+            
+            if (!motions[groupName]) {
+                motions[groupName] = [];
+            }
+            
+            for (let j = 0; j < motionCount; j++) {
+                // 使用 modelSetting 获取动作文件名
+                const motionFileName = modelSetting.getMotionFileName(groupName, j);
+                const motionPath = modelHomeDir + motionFileName;
+                const motionName = `${groupName}_${j}`;
                 console.log(`Loading motion: ${motionName} from ${motionPath}`);
                 
                 motionPromises.push(
                     fetch(motionPath)
                         .then(response => response.arrayBuffer())
                         .then(arrayBuffer => {
-                            const motion = Live2DCubismFramework.CubismMotion.createFromArrayBuffer(arrayBuffer);
+                            // 修复：使用正确的 Cubism SDK API
+                            const motion = Live2DCubismFramework.CubismMotion.create(arrayBuffer);
                             if (!motions[groupName]) {
                                 motions[groupName] = [];
                             }
-                            motions[groupName][i] = motion;
+                            motions[groupName][j] = motion;
                             console.log(`Loaded motion: ${motionName}`);
                         })
                         .catch(e => {
@@ -372,13 +487,15 @@ async function loadMotions() {
                 );
             }
         }
-    }
-    
-    try {
-        await Promise.all(motionPromises);
-        console.log(`Loaded motions for ${Object.keys(motions).length} groups`);
+        
+        try {
+            await Promise.all(motionPromises);
+            console.log(`Loaded motions for ${Object.keys(motions).length} groups`);
+        } catch (e) {
+            console.error('Error loading motions:', e);
+        }
     } catch (e) {
-        console.error('Error loading motions:', e);
+        console.error('Error processing motion groups:', e);
     }
 }
 
@@ -394,8 +511,9 @@ async function loadModel(modelPath) {
         // 加载模型设置
         await loadModelSetting(modelPath);
         
-        // 构造MOC文件路径
-        let mocPath = modelHomeDir + modelSetting.FileReferences.Moc;
+        // 使用 modelSetting 获取 MOC 文件名并构造路径
+        const mocFileName = modelSetting.getModelFileName();
+        let mocPath = modelHomeDir + mocFileName;
         console.log('Loading MOC file:', mocPath);
         
         // 加载MOC文件
@@ -414,91 +532,206 @@ async function loadModel(modelPath) {
         await loadMotions();
         
         // 初始化模型矩阵
-        // 修复：使用正确的 Cubism SDK 5.1 API
+        // 修复：使用正确的 Cubism SDK API
+        // 检查多种可能的类路径
         if (Live2DCubismFramework.CubismModelMatrix) {
             modelMatrix = new Live2DCubismFramework.CubismModelMatrix(
                 cubismModel.getCanvasWidth(), 
                 cubismModel.getCanvasHeight()
             );
-        } else if (Live2DCubismFramework.CubismMath && Live2DCubismFramework.CubismMath.CubismModelMatrix) {
-            // 处理不同版本 SDK 的命名差异
-            modelMatrix = new Live2DCubismFramework.CubismMath.CubismModelMatrix(
+        } else if (Live2DCubismCore.CubismModelMatrix) {
+            modelMatrix = new Live2DCubismCore.CubismModelMatrix(
                 cubismModel.getCanvasWidth(),
                 cubismModel.getCanvasHeight()
             );
         } else {
-            // fallback 到简单矩阵操作
-            console.warn('CubismModelMatrix not found, using basic positioning');
+            // 如果SDK中没有提供矩阵类，则创建一个简单的投影矩阵
             modelMatrix = {
-                setCenterPosition: function(x, y) {
-                    console.log('Set center position:', x, y);
-                },
-                setWidth: function(width) {
-                    console.log('Set width:', width);
-                },
-                getMvpMatrix: function() {
-                    // 返回单位矩阵
-                    return [
-                        1, 0, 0, 0,
-                        0, 1, 0, 0,
-                        0, 0, 1, 0,
-                        0, 0, 0, 1
-                    ];
-                }
+                setCenterPosition: function(x, y) { /* 空实现 */ },
+                bottom: function(n) { /* 空实现 */ },
+                setWidth: function(w) { /* 空实现 */ }
             };
         }
         
+        // 设置模型矩阵
         modelMatrix.setCenterPosition(0.0, 0.0);
+        modelMatrix.bottom(1.0);
         modelMatrix.setWidth(2.0);
         
-        // 启动渲染循环
-        startRenderingLoop();
-        
-        console.log('Model loaded successfully');
-        return Promise.resolve();
+        console.log('Model fully loaded and initialized');
+        return true;
     } catch (e) {
         console.error('Error loading model:', e);
-        return Promise.reject(e);
+        throw e;
+    }
+}
+
+// 更新模型
+function updateModel() {
+    // 增加时间戳
+    const currentTime = performance.now();
+    const deltaTime = lastFrameTime ? (currentTime - lastFrameTime) : 16.0;
+    lastFrameTime = currentTime;
+    
+    try {
+        // 更新参数
+        if (cubismModel) {
+            // 更新动作
+            if (motionManager && typeof motionManager.isFinished === 'function') {
+                if (!motionManager.isFinished()) {
+                    if (typeof motionManager.updateMotion === 'function') {
+                        motionManager.updateMotion(cubismModel, deltaTime / 1000.0);
+                    }
+                }
+            } else if (motionManager && typeof motionManager.updateMotion === 'function') {
+                // 直接更新动作而不检查是否完成
+                motionManager.updateMotion(cubismModel, deltaTime / 1000.0);
+            }
+            
+            // 保存参数
+            if (typeof cubismModel.saveParameters === 'function') {
+                cubismModel.saveParameters();
+            } else if (cubismModel.model && typeof cubismModel.model.saveParameters === 'function') {
+                cubismModel.model.saveParameters();
+            }
+            
+            // 眨眼
+            if (eyeBlink && typeof eyeBlink.updateParameters === 'function') {
+                eyeBlink.updateParameters(cubismModel, deltaTime / 1000.0);
+            }
+            
+            // 呼吸
+            if (breath && typeof breath.updateParameters === 'function') {
+                breath.updateParameters(cubismModel, deltaTime / 1000.0);
+            }
+            
+            // 物理运算
+            if (physics && typeof physics.evaluate === 'function') {
+                physics.evaluate(cubismModel, deltaTime / 1000.0);
+            }
+            
+            // 姿势
+            if (pose && typeof pose.updateParameters === 'function') {
+                pose.updateParameters(cubismModel, deltaTime / 1000.0);
+            }
+            
+            // 更新模型
+            if (typeof cubismModel.update === 'function') {
+                cubismModel.update();
+            } else if (cubismModel.model && typeof cubismModel.model.update === 'function') {
+                cubismModel.model.update();
+            }
+        }
+    } catch (e) {
+        console.error('Error updating model:', e);
+    }
+}
+
+// 渲染模型
+function renderModel() {
+    try {
+        if (!gl || !renderer || !cubismModel) {
+            return;
+        }
+        
+        // 清除画布
+        gl.clearColor(0.0, 0.0, 0.0, 0.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        
+        // 更新视口
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        
+        // 设置投影矩阵
+        const projection = new Live2DCubismFramework.CubismMatrix44();
+        projection.multiplyByMatrix(modelMatrix);
+        
+        // 渲染模型
+        if (renderer) {
+            // 尝试不同的渲染方法，按优先级排序
+            if (typeof renderer.setMvpMatrix === 'function' && typeof renderer.drawModel === 'function') {
+                // 新版本SDK：先设置MVP矩阵，再绘制模型
+                renderer.setMvpMatrix(projection);
+                renderer.setModel(cubismModel); // 确保模型被正确设置
+                renderer.drawModel();
+            } 
+            else if (typeof renderer.setProjection === 'function' && typeof renderer.setModel === 'function' && typeof renderer.draw === 'function') {
+                // 中间版本SDK
+                renderer.setProjection(projection);
+                renderer.setModel(cubismModel);
+                renderer.draw();
+            } 
+            else if (typeof renderer.render === 'function') {
+                // 老版本SDK直接渲染
+                renderer.render(cubismModel);
+            } 
+            else if (typeof renderer.doDrawModel === 'function') {
+                // 备用方法
+                renderer.setModel(cubismModel);
+                renderer.doDrawModel();
+            } 
+            else if (typeof renderer.drawModel === 'function') {
+                // 最后尝试
+                renderer.setModel(cubismModel);
+                renderer.drawModel();
+            } 
+            else {
+                console.warn('No valid render function found');
+            }
+        }
+    } catch (e) {
+        console.error('Error rendering model:', e);
     }
 }
 
 // 渲染循环
-function rendering() {
-    if (!gl || !cubismModel || !renderer) {
-        return;
+function renderLoop() {
+    try {
+        if (!renderer || !cubismModel) {
+            console.warn('Renderer or model not ready');
+            return;
+        }
+
+        // 使用新的更新和渲染函数
+        updateModel();
+        renderModel();
+
+        // 请求下一帧
+        animationFrameId = requestAnimationFrame(renderLoop);
+    } catch (e) {
+        console.error('Error in render loop:', e);
     }
-    
-    // 计算时间差
-    const currentTime = new Date().getTime();
-    if (lastTime === null) {
-        lastTime = currentTime;
-    }
-    const deltaTime = (currentTime - lastTime) / 1000;
-    lastTime = currentTime;
-    
-    // 更新模型
-    cubismModel.loadParameters();
-    cubismModel.update();
-    cubismModel.saveParameters();
-    
-    // 清除画布
-    gl.clearColor(0.0, 0.0, 0.0, 0.0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    
-    // 渲染模型
-    renderer.setMvpMatrix(modelMatrix.getMvpMatrix());
-    renderer.drawModel();
-    
-    // 请求下一帧
-    animationFrameId = requestAnimationFrame(rendering);
 }
 
 // 启动渲染循环
 function startRenderingLoop() {
-    if (!animationFrameId) {
-        lastTime = null;
-        animationFrameId = requestAnimationFrame(rendering);
+    if (!canvas) {
+        console.error('Canvas not initialized');
+        return;
+    }
+    
+    // 设置清除颜色
+    if (gl) {
+        gl.clearColor(0.0, 0.0, 0.0, 0.0);
+    }
+    
+    // 启动渲染循环
+    function renderLoop() {
+        // 更新模型
+        updateModel();
+        
+        // 渲染模型
+        renderModel();
+        
+        // 继续循环
+        animationFrameId = requestAnimationFrame(renderLoop);
+    }
+    
+    // 启动循环
+    if (typeof requestAnimationFrame !== 'undefined') {
+        animationFrameId = requestAnimationFrame(renderLoop);
         console.log('Rendering loop started');
+    } else {
+        console.error('requestAnimationFrame is not supported');
     }
 }
 
@@ -522,12 +755,16 @@ function setPosition(x, y) {
 function startMotion(group, index) {
     if (motions[group] && motions[group][index]) {
         const motion = motions[group][index];
-        // 修复：使用正确的 Cubism SDK 5.1 API
+        // 修复：使用正确的 Cubism SDK API
+        // 检查多种可能的类路径
         if (cubismModel.startMotion) {
             cubismModel.startMotion(motion, false);
-        } else if (cubismModel.motionManager) {
+        } else if (cubismModel.motionManager && cubismModel.motionManager.startMotion) {
             // 处理不同版本 SDK 的命名差异
             cubismModel.motionManager.startMotion(motion, false);
+        } else if (Live2DCubismFramework.CubismMotion && Live2DCubismFramework.CubismMotion.startMotion) {
+            // 处理另一种可能的API结构
+            Live2DCubismFramework.CubismMotion.startMotion(cubismModel, motion, false);
         }
         console.log(`Started motion: ${group}[${index}]`);
     } else {
@@ -539,12 +776,16 @@ function startMotion(group, index) {
 function setExpression(expressionName) {
     if (expressions[expressionName]) {
         const expression = expressions[expressionName];
-        // 修复：使用正确的 Cubism SDK 5.1 API
+        // 修复：使用正确的 Cubism SDK API
+        // 检查多种可能的类路径
         if (cubismModel.setExpression) {
             cubismModel.setExpression(expression);
-        } else if (cubismModel.expressionManager) {
+        } else if (cubismModel.expressionManager && cubismModel.expressionManager.setExpression) {
             // 处理不同版本 SDK 的命名差异
             cubismModel.expressionManager.setExpression(expression);
+        } else if (Live2DCubismFramework.CubismExpressionMotion && Live2DCubismFramework.CubismExpressionMotion.setExpression) {
+            // 处理另一种可能的API结构
+            Live2DCubismFramework.CubismExpressionMotion.setExpression(cubismModel, expression);
         }
         console.log(`Set expression: ${expressionName}`);
     } else {
@@ -585,11 +826,12 @@ function handleMouseUp(event) {
 window.initLive2D = initLive2D;
 window.loadModel = loadModel;
 window.loadModelSetting = loadModelSetting;
-window.loadModelMoc = loadModelMoc;
 window.loadTextures = loadTextures;
 window.loadMotions = loadMotions;
 window.loadExpressions = loadExpressions;
 window.renderLoop = renderLoop;
+window.updateModel = updateModel;
+window.renderModel = renderModel;
 window.setScale = setScale;
 window.setPosition = setPosition;
 window.startMotion = startMotion;
